@@ -90,8 +90,16 @@ int main(int argc, char** argv) {
     if (!gpu) {
 #ifdef _WIN32
         _putenv_s("CUDA_VISIBLE_DEVICES", "-1");
+#ifdef STRATA_VISION_HIP
+        _putenv_s("HIP_VISIBLE_DEVICES", "-1");
+        _putenv_s("ROCR_VISIBLE_DEVICES", "-1");
+#endif
 #else
         setenv("CUDA_VISIBLE_DEVICES", "-1", 1);
+#ifdef STRATA_VISION_HIP
+        setenv("HIP_VISIBLE_DEVICES", "-1", 1);
+        setenv("ROCR_VISIBLE_DEVICES", "-1", 1);
+#endif
 #endif
     }
     llama_log_set(quiet_log, nullptr);
