@@ -4,6 +4,7 @@ so, with the nvidia-smi check, instead of only the first line of the encoder's o
     python -m serve.test_vision_busy
 """
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,17 @@ import serve.server as server
 
 
 class Busy(unittest.TestCase):
+    def test_encoder_runtime_does_not_change_engine_environment(self):
+        parent = {"PATH": "engine-runtime", "HIP_VISIBLE_DEVICES": "1"}
+        cfg = {"exe": "vision", "mmproj": "projector", "model": "model", "gpu": True,
+               "lib_dirs": ["vision-runtime"]}
+        with mock.patch.object(server.Vision, "work_dir", lambda self: Path(".")):
+            v = server.Vision(cfg, env=parent, lazy=True)
+        variable = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
+        self.assertEqual(v.spawn[2][variable].split(os.pathsep)[0], "vision-runtime")
+        self.assertEqual(v.spawn[2]["HIP_VISIBLE_DEVICES"], "1")
+        self.assertEqual(parent, {"PATH": "engine-runtime", "HIP_VISIBLE_DEVICES": "1"})
+
     def test_message_names_the_cause_from_the_line(self):
         m = server.vision_start_error("ggml_backend_cuda_device_get_memory: cudaMemGetInfo failed "
                                       "(CUDA-capable device(s) is/are busy or unavailable), returning 0/0")

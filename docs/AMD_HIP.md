@@ -82,8 +82,12 @@ On a PC with no NVIDIA card Strata can use, the AMD card is chosen by itself; wi
   the PATH): if the HIP runtime does not see the card, setup stops there and points to the driver. It also gives the
   card's HIP number: with an integrated Radeon that is device 1, not 0 (#325). From then on setup lists the AMD cards
   as HIP numbers them, so `--gpu N` and the config's `"gpu"` are HIP numbers.
-- **Differences from Windows-on-NVIDIA and Linux-on-AMD:** no images yet (the CPU image encoder is Linux-only for
-  now), one card per model (`--gpus` is Linux-only for now), no calibration.
+- **Images (opt-in):** `START-HERE.bat --vision gpu` builds a HIP encoder with Visual Studio C++ Build Tools and
+  a private ROCm SDK, downloads the matching mmproj and writes the image configuration. This adds several GB of
+  SDK downloads on the first run. See [the HIP encoder guide](../tools/vision/HIP.md). Images stay off by default;
+  Windows CPU vision remains unavailable through setup.
+- **Differences from Windows-on-NVIDIA and Linux-on-AMD:** one card per model (`--gpus` is Linux-only for now),
+  no calibration.
 - Two Windows-only engine details (#247, #325): hipBLAS can return success and still leave `hipErrorInvalidValue`
   set after some BF16/FP16 GEMMs (seen on gfx1201); the engine clears that one stale error after a GEMM that
   succeeded, on Windows only. `hipHostGetDevicePointer` returns the host pointer itself on Windows: kernels read

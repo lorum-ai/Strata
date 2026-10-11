@@ -2078,6 +2078,10 @@ class Vision:
         if cfg.get("min_tokens"):                       # #767: mtmd's image_min_tokens (a hand-edited key)
             args += ["--min-tokens", str(cfg["min_tokens"])]
         self.dir = self.work_dir()
+        if cfg.get("lib_dirs"):
+            env = dict(os.environ if env is None else env)
+            var = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
+            env[var] = os.pathsep.join([*map(str, cfg["lib_dirs"]), env.get(var, "")])
         self.spawn = (args, log, env)                   # to start it again after an unload
         self.proc = None
         self.stopped = True

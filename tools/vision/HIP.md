@@ -1,7 +1,26 @@
 # Experimental HIP image encoder
 
 This builds Strata's existing mtmd encoder with llama.cpp's HIP backend. It uses the same model's mmproj file
-and SVE1 embeddings as the CUDA and CPU builds. Setup does not enable this path yet.
+and SVE1 embeddings as the CUDA and CPU builds.
+
+## Install on Windows
+
+Run `START-HERE.bat --vision gpu` (or `--vision yes`) to opt in. Images stay off when no vision option is supplied.
+Visual Studio C++ Build Tools with the Desktop development with C++ workload are required. Setup installs a private
+ROCm SDK in `.rocm-win`, builds the encoder for the selected card, downloads the matching model family's mmproj
+through the existing resumable downloader, and writes the vision configuration. The first SDK download takes
+several GB. `STRATA_ROCM_VERSION`, `STRATA_ROCM_INDEX` and `ROCM_VENV` override the SDK defaults, as in the HIP engine
+build script. The default SDK is ROCm `10.2.0a20260930`.
+
+The encoder is installed in `engine/vision-hip`. Its runtime dependency DLLs are copied beside it and its own
+library path is supplied to the encoder process, without replacing the language engine's DLLs or library path.
+Setup records the backend, source, llama.cpp revision, architectures and SDK in `engine/BUILD.json`; changed or
+missing encoders are rebuilt or redeployed on the next setup run. GPU mode requires a visible HIP device and a
+successful warm-up before `READY`. The existing server starts the encoder before sizing the language engine cache.
+
+Linux setup's image choices remain unchanged; Windows CPU vision is still outside this integration.
+
+## Manual build
 
 On Windows, use Visual Studio C++ Build Tools, CMake, Ninja and the private ROCm SDK used by
 `tools/hip/build_windows.bat`. Initialize that SDK with `.rocm-win\Scripts\rocm-sdk.exe init`.
@@ -58,6 +77,5 @@ with IQ3_XXS. These are smoke tests, not a quality benchmark.
   configuration succeeded when launched outside that sandbox. This does not require an elevated Windows
   console for the user's normal launcher.
 
-The standard installer still does not enable HIP vision. Use a separate, locally maintained server config for
-this experimental build; setup can regenerate configs without this encoder. Machine-specific launchers and
-configs, binaries, dependencies and model weights are not part of this contribution.
+The measurements above describe the original manual build. They do not validate later installer changes.
+Machine-specific launchers and configs, binaries, dependencies and model weights are not part of this contribution.

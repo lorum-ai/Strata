@@ -127,6 +127,28 @@ int main(int argc, char** argv) {
 
     mtmd_context_params cp = mtmd_context_params_default();
     cp.use_gpu = gpu;
+#ifdef STRATA_VISION_HIP
+    if (gpu) {
+        // The server masks devices to the selected card(s); use the first visible HIP device.
+        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+            auto dev = ggml_backend_dev_get(i);
+            auto type = ggml_backend_dev_type(dev);
+            if ((type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) &&
+                std::strcmp(ggml_backend_reg_name(ggml_backend_dev_backend_reg(dev)), "ROCm") == 0) {
+                cp.device = dev;
+                break;
+            }
+        }
+        if (!cp.device) {
+            std::printf("ERR no visible HIP GPU; check HIP_VISIBLE_DEVICES and the ROCm runtime\n");
+            std::fflush(stdout);
+            llama_model_free(text);
+            return 1;
+        }
+        std::fprintf(stderr, "strata-vision: HIP device %s (%s)\n", ggml_backend_dev_name(cp.device),
+                     ggml_backend_dev_description(cp.device));
+    }
+#endif
     cp.print_timings = false;
     cp.warmup = false;
     // On the CPU "auto" turns flash attention on.  ggml's fast (tiled) CPU kernel for it needs the head size, 72 in this
@@ -187,6 +209,15 @@ int main(int argc, char** argv) {
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - warm_t0).count());
         mtmd_input_chunks_free(chunks);
         if (bm) mtmd_bitmap_free(bm);
+#ifdef STRATA_VISION_HIP
+        if (warm_tokens <= 0) {
+            std::printf("ERR HIP GPU warm-up failed\n");
+            std::fflush(stdout);
+            mtmd_free(ctx);
+            llama_model_free(text);
+            return 1;
+        }
+#endif
     }
     std::printf("READY %d\n", n_embd);
     std::fflush(stdout);

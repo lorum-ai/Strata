@@ -2686,8 +2686,10 @@ def build_engine_hip(gpu, llama, vision="none") -> Path:
 
 
 def hip_vision(asked) -> str:
-    """The image encoder with the AMD backend (--vision): the CPU one when asked for (#304); a HIP (GPU) encoder build
-    is a later step, so `yes`/`gpu` leave images off, as before, and say how to get them."""
+    """AMD images are opt-in: Linux's CPU encoder (#304), or Windows's source-built HIP encoder.
+    Without an explicit choice images stay off. Linux GPU and Windows CPU setup remain unavailable."""
+    if WIN and asked in ("yes", "gpu"):
+        return "gpu"
     if asked in ("yes", "gpu"):
         warn("the AMD backend has no GPU image encoder yet: images off"
              + ("" if WIN else " (--vision cpu reads them on the CPU)"))
@@ -2696,6 +2698,63 @@ def hip_vision(asked) -> str:
              "image encoder): images off")
         return "none"
     return "cpu" if asked == "cpu" else "none"
+
+
+def build_windows_hip_vision(eng: Path, gpu: dict, llama: Path) -> Path:
+    """Opt-in source build beside the ready-made engine, with a private ROCm SDK and runtime.
+
+    The encoder has its own DLL directory: never replace the language engine's runtime.
+    Build output survives engine updates; BUILD.json in engine/ records the deployed encoder.
+    """
+    vcvars = find_vcvars()
+    if vcvars is None:
+        fail("AMD GPU images need Visual Studio C++ Build Tools to compile the encoder",
+             "install the Desktop development with C++ workload, then run START-HERE.bat --vision gpu again")
+    archs = sorted(set(gpu.get("archs") or [gpu["arch"]]))
+    version = os.environ.get("STRATA_ROCM_VERSION", "10.2.0a20260930")
+    index = os.environ.get("STRATA_ROCM_INDEX", "https://nightly.repo.amd.com/rocm/whl-next/")
+    venv = Path(os.environ.get("ROCM_VENV", str(ROOT / ".rocm-win"))).resolve()
+    py = venv / "Scripts" / "python.exe"
+    sdk = venv / "Scripts" / "rocm-sdk.exe"
+    want = {"version": version, "index": index, "archs": archs}
+    sdk_stamp = venv / "strata-vision-rocm.json"
+    have = json.loads(sdk_stamp.read_text()) if sdk_stamp.exists() else {}
+    if not py.exists():
+        run([sys.executable, "-m", "venv", str(venv)])
+    if have != want or not sdk.exists():
+        say("  Installing the private ROCm SDK for AMD GPU images (several GB, once) ...")
+        extras = ",".join(["libraries", "devel", *[f"device-{a}" for a in archs]])
+        run([str(py), "-m", "pip", "install", "--disable-pip-version-check", "--index-url", index,
+             f"rocm[{extras}]=={version}"])
+        run([str(sdk), "init"])
+        sdk_stamp.write_text(json.dumps(want))
+    root = Path(out([str(sdk), "path", "--root"]).strip())
+    if not (root / "lib/llvm/bin/clang++.exe").is_file():
+        fail(f"the private ROCm SDK has no compiler in {root}", "run rocm-sdk init and retry setup")
+    bdir = ROOT / "build-vision-hip"
+    deployed = eng / "vision-hip"
+    stamp = eng / "BUILD.json"
+    meta = json.loads(stamp.read_text(encoding="utf-8"))
+    expected = {"vision": "gpu", "vision_backend": "hip", "vision_src": source_hash((
+                    "tools/vision/CMakeLists.txt", "tools/vision/strata_vision.cpp",
+                    "tools/vision/build_hip_windows.bat", "tools/hip/dll_closure.py", "setup.py")),
+                "vision_archs": archs, "vision_rocm": version, "vision_rocm_root": str(root),
+                "vision_llama": LLAMA_CPP_COMMIT}
+    if not (deployed / VEXE).exists() or any(meta.get(k) != v for k, v in expected.items()):
+        env = dict(os.environ, ROCM_VENV=str(venv), STRATA_HIP_ARCHS=";".join(archs),
+                   STRATA_VCVARS=str(vcvars), STRATA_LLAMA_DIR=str(llama))
+        run(["cmd.exe", "/d", "/c", str(ROOT / "tools/vision/build_hip_windows.bat")], env=env)
+        deployed.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(bdir / "bin" / VEXE, deployed / VEXE)
+    for name in hip_runtime_closure(root / "bin"):
+        src, dst = root / "bin" / name, deployed / name
+        if not dst.exists() or dst.stat().st_size != src.stat().st_size or dst.stat().st_mtime < src.stat().st_mtime:
+            shutil.copy2(src, dst)
+    meta.update(expected)
+    meta.update(vision_exe=str(deployed / VEXE), vision_lib_dirs=[str(root / "bin")])
+    stamp.write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    ok(f"AMD GPU image encoder: {deployed / VEXE}")
+    return eng
 
 
 def build_vision_cpu(eng: Path, stamp: Path, meta: dict, llama, vsrc) -> Path:
@@ -3877,7 +3936,7 @@ def write_config(path: Path, cfg: dict):
 SETUP_KEYS = frozenset({"exe", "args", "cwd", "tokenizer", "model_name", "log", "lib_dirs", "port", "backend", "env",
                         "gpu", "gpus_asked", "layer_split", "host", "api_key", "draft_vocab", "vision"})
 SETUP_ENV = frozenset({"STRATA_HIPBLASLT_TUNING", "STRATA_RESIDENT_PIN", "STRATA_NO_ARENA_THP"})   # the "env" entries setup writes
-SETUP_VISION = frozenset({"exe", "mmproj", "model", "gpu", "max_tokens", "threads"})
+SETUP_VISION = frozenset({"exe", "mmproj", "model", "gpu", "max_tokens", "threads", "lib_dirs"})
 
 
 def carry_over(old: dict, cfg: dict) -> list[str]:
@@ -5490,6 +5549,8 @@ def main() -> int:
                  "START-HERE.bat --backend hip --prebuilt <its dist folder> (docs/AMD_HIP.md)")
         gpu = hip_card(eng, gpu, amd)
         a.gpu = gpu["index"] if gpu["count"] > 1 else a.gpu
+        if vision == "gpu":
+            eng = build_windows_hip_vision(eng, gpu, llama)
     else:
         eng = None if a.build or hip else get_prebuilt(a.prebuilt, gpu, vision, **({"toolkit": 12} if cuda_tk == 12
                                                                                     else {}))
@@ -5794,6 +5855,8 @@ def main() -> int:
         vt = vision_tokens(a.vision_tokens, vision, old_cfg if old_cfg.is_file() else adopted)
         cfg["vision"] = {"exe": str(eng / VEXE), "mmproj": str(mmproj), "model": str(shards[0]),
                          "gpu": vision == "gpu", "max_tokens": vt}
+        if hip and WIN and vision == "gpu":
+            cfg["vision"].update(exe=meta["vision_exe"], lib_dirs=meta["vision_lib_dirs"])
         if vision == "cpu":
             cfg["vision"]["threads"] = max(1, (os.cpu_count() or 8) // 2)
     elif a.vision_tokens is not None:

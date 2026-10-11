@@ -433,7 +433,10 @@ class WindowsHipVision(unittest.TestCase):
     def test_no_cpu_encoder_on_windows(self):
         with mock.patch.object(setup, "WIN", True), mock.patch.object(setup, "warn", lambda *a: None):
             self.assertEqual(setup.hip_vision("cpu"), "none")
-            self.assertEqual(setup.hip_vision("yes"), "none")
+            self.assertEqual(setup.hip_vision("yes"), "gpu")
+            self.assertEqual(setup.hip_vision("gpu"), "gpu")
+            for asked in (None, "no", "none"):
+                self.assertEqual(setup.hip_vision(asked), "none")
         with mock.patch.object(setup, "WIN", False), mock.patch.object(setup, "warn", lambda *a: None):
             self.assertEqual(setup.hip_vision("cpu"), "cpu")
 
